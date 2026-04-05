@@ -1,0 +1,56 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+*.pdb
+*.egg-info/
+*.egg
+dist/
+build/
+.eggs/
+.python-version
+
+# Virtual environments
+venv/
+ENV/
+env/
+virtenv/
+.venv/
+
+# IDEs and editors
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Chroma DB and local store
+memory/store/
+
+# Logs
+*.log
+
+# Environment variables
+.env
+.env.*
+
+# Python bytecode
+*.pyc
+
+# MyPy
+.mypy_cache/
+.dmypy.json
+
+# Coverage
+htmlcov/
+.coverage
+.coverage.*
+.pytest_cache/
+
+# Jupyter
+.ipynb_checkpoints/
