@@ -1,0 +1,27 @@
+import type { Metadata } from "next";
+import { Roboto_Mono } from "next/font/google";
+import "./globals.css";
+
+const robotoMono = Roboto_Mono({
+  subsets: ["latin"],
+  variable: "--font-roboto-mono",
+});
+
+export const metadata: Metadata = {
+  title: "ARIA | Holographic Interface",
+  description: "Autonomous Research and Inbox Assistant",
+};
+
+export default function RootLayout({
+  children,
+}: Readonly<{
+  children: React.ReactNode;
+}>) {
+  return (
+    <html lang="en" className="dark">
+      <body className={`${robotoMono.variable} font-mono antialiased bg-black`}>
+        {children}
+      </body>
+    </html>
+  );
+}

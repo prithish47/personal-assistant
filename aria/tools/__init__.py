@@ -1,0 +1,1 @@
+"""Typed, permissioned desktop capabilities."""
