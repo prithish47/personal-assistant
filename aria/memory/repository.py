@@ -1,43 +1,49 @@
-"""SQLite-backed local memory repository with no database global state."""
+"""ChromaDB-backed local memory repository with no database global state."""
 
 from __future__ import annotations
 
 import asyncio
 import json
-import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 from uuid import UUID
+
+import chromadb
+from chromadb.config import Settings as ChromaSettings
 
 from aria.memory.models import MemoryKind, MemoryRecord
 
+_COLLECTION_NAME = "memories"
+
 
 class MemoryRepository:
-    """Persists memory records locally and exposes explicit CRUD operations."""
+    """Persists memory records in a local, on-disk ChromaDB collection.
 
-    def __init__(self, database_path: Path) -> None:
-        self._database_path = database_path
+    Embeddings are always supplied by the caller (see `MemoryService`), so
+    Chroma's own embedding function is never invoked and no model is ever
+    downloaded or called over the network by this class.
+    """
+
+    def __init__(self, persist_directory: Path) -> None:
+        self._persist_directory = persist_directory
+        self._client: Any = None
+        self._collection: Any = None
 
     async def initialize(self) -> None:
-        """Create the local schema once during application startup."""
+        """Open (or create) the local persistent collection once at startup."""
 
         await asyncio.to_thread(self._initialize_sync)
 
-    def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self._database_path)
-        connection.row_factory = sqlite3.Row
-        return connection
-
     def _initialize_sync(self) -> None:
-        self._database_path.parent.mkdir(parents=True, exist_ok=True)
-        with self._connect() as connection:
-            connection.execute("""CREATE TABLE IF NOT EXISTS memories (
-                id TEXT PRIMARY KEY, user_id TEXT NOT NULL, kind TEXT NOT NULL, content TEXT NOT NULL,
-                importance REAL NOT NULL, pinned INTEGER NOT NULL, metadata TEXT NOT NULL,
-                created_at TEXT NOT NULL, updated_at TEXT NOT NULL, last_accessed_at TEXT NOT NULL,
-                expires_at TEXT, embedding TEXT
-            )""")
-            connection.execute("CREATE INDEX IF NOT EXISTS idx_memories_user_kind ON memories(user_id, kind)")
+        self._persist_directory.mkdir(parents=True, exist_ok=True)
+        self._client = chromadb.PersistentClient(
+            path=str(self._persist_directory),
+            settings=ChromaSettings(anonymized_telemetry=False),
+        )
+        self._collection = self._client.get_or_create_collection(
+            name=_COLLECTION_NAME, metadata={"hnsw:space": "cosine"}
+        )
 
     async def save(self, record: MemoryRecord) -> MemoryRecord:
         """Insert or replace a validated memory record."""
@@ -46,39 +52,52 @@ class MemoryRepository:
         return record
 
     def _save_sync(self, record: MemoryRecord) -> None:
-        with self._connect() as connection:
-            connection.execute(
-                """INSERT OR REPLACE INTO memories VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    str(record.id),
-                    record.user_id,
-                    record.kind.value,
-                    record.content,
-                    record.importance,
-                    int(record.pinned),
-                    json.dumps(record.metadata),
-                    record.created_at.isoformat(),
-                    record.updated_at.isoformat(),
-                    record.last_accessed_at.isoformat(),
-                    record.expires_at.isoformat() if record.expires_at else None,
-                    json.dumps(record.embedding) if record.embedding else None,
-                ),
-            )
+        self._collection.upsert(
+            ids=[str(record.id)],
+            embeddings=[record.embedding] if record.embedding is not None else None,
+            documents=[record.content],
+            metadatas=[self._to_metadata(record)],
+        )
 
     async def find(self, user_id: str, kind: MemoryKind | None = None) -> list[MemoryRecord]:
-        """Return non-expired memory for the user, newest first."""
+        """Return non-expired memory for the user, pinned/important/recent first."""
 
         return await asyncio.to_thread(self._find_sync, user_id, kind)
 
     def _find_sync(self, user_id: str, kind: MemoryKind | None) -> list[MemoryRecord]:
-        query = "SELECT * FROM memories WHERE user_id = ? AND (expires_at IS NULL OR expires_at > ?)"
-        params: list[str] = [user_id, datetime.now(UTC).isoformat()]
+        where: dict[str, Any] = {"user_id": user_id}
         if kind:
-            query += " AND kind = ?"
-            params.append(kind.value)
-        query += " ORDER BY pinned DESC, importance DESC, updated_at DESC"
-        with self._connect() as connection:
-            return [self._record(row) for row in connection.execute(query, params).fetchall()]
+            where = {"$and": [{"user_id": user_id}, {"kind": kind.value}]}
+        result = self._collection.get(where=where, include=["documents", "metadatas", "embeddings"])
+        records = [record for record in self._records_from_get(result) if not self._is_expired(record)]
+        records.sort(key=lambda item: (item.pinned, item.importance, item.updated_at), reverse=True)
+        return records
+
+    async def query_similar(
+        self, user_id: str, query_embedding: list[float], limit: int
+    ) -> list[tuple[MemoryRecord, float]]:
+        """Return the nearest memories to a query embedding, most similar first."""
+
+        return await asyncio.to_thread(self._query_similar_sync, user_id, query_embedding, limit)
+
+    def _query_similar_sync(
+        self, user_id: str, query_embedding: list[float], limit: int
+    ) -> list[tuple[MemoryRecord, float]]:
+        if limit <= 0 or self._collection.count() == 0:
+            return []
+        result = self._collection.query(
+            query_embeddings=[query_embedding],
+            n_results=limit,
+            where={"user_id": user_id},
+            include=["documents", "metadatas", "embeddings", "distances"],
+        )
+        scored: list[tuple[MemoryRecord, float]] = []
+        for record, distance in zip(self._records_from_query(result), result["distances"][0], strict=True):
+            if self._is_expired(record):
+                continue
+            similarity = max(0.0, 1.0 - distance)
+            scored.append((record, similarity))
+        return scored
 
     async def delete(self, memory_id: UUID, user_id: str) -> bool:
         """Delete exactly one user-owned memory record."""
@@ -86,27 +105,70 @@ class MemoryRepository:
         return await asyncio.to_thread(self._delete_sync, memory_id, user_id)
 
     def _delete_sync(self, memory_id: UUID, user_id: str) -> bool:
-        with self._connect() as connection:
-            return (
-                connection.execute(
-                    "DELETE FROM memories WHERE id = ? AND user_id = ?", (str(memory_id), user_id)
-                ).rowcount
-                > 0
-            )
+        existing = self._collection.get(ids=[str(memory_id)], include=["metadatas"])
+        if not existing["ids"] or existing["metadatas"][0].get("user_id") != user_id:
+            return False
+        self._collection.delete(ids=[str(memory_id)])
+        return True
 
     @staticmethod
-    def _record(row: sqlite3.Row) -> MemoryRecord:
+    def _to_metadata(record: MemoryRecord) -> dict[str, Any]:
+        metadata: dict[str, Any] = {
+            "user_id": record.user_id,
+            "kind": record.kind.value,
+            "importance": record.importance,
+            "pinned": record.pinned,
+            "metadata_json": json.dumps(record.metadata),
+            "created_at": record.created_at.isoformat(),
+            "updated_at": record.updated_at.isoformat(),
+            "last_accessed_at": record.last_accessed_at.isoformat(),
+        }
+        if record.expires_at is not None:
+            metadata["expires_at"] = record.expires_at.isoformat()
+        return metadata
+
+    @staticmethod
+    def _is_expired(record: MemoryRecord) -> bool:
+        return record.expires_at is not None and record.expires_at <= datetime.now(UTC)
+
+    @classmethod
+    def _record_from_parts(
+        cls, memory_id: str, document: str, metadata: dict[str, Any], embedding: list[float] | None
+    ) -> MemoryRecord:
+        expires_at = metadata.get("expires_at")
         return MemoryRecord(
-            id=UUID(row["id"]),
-            user_id=row["user_id"],
-            kind=MemoryKind(row["kind"]),
-            content=row["content"],
-            importance=row["importance"],
-            pinned=bool(row["pinned"]),
-            metadata=json.loads(row["metadata"]),
-            created_at=datetime.fromisoformat(row["created_at"]),
-            updated_at=datetime.fromisoformat(row["updated_at"]),
-            last_accessed_at=datetime.fromisoformat(row["last_accessed_at"]),
-            expires_at=datetime.fromisoformat(row["expires_at"]) if row["expires_at"] else None,
-            embedding=json.loads(row["embedding"]) if row["embedding"] else None,
+            id=UUID(memory_id),
+            user_id=metadata["user_id"],
+            kind=MemoryKind(metadata["kind"]),
+            content=document,
+            importance=metadata["importance"],
+            pinned=bool(metadata["pinned"]),
+            metadata=json.loads(metadata.get("metadata_json", "{}")),
+            created_at=datetime.fromisoformat(metadata["created_at"]),
+            updated_at=datetime.fromisoformat(metadata["updated_at"]),
+            last_accessed_at=datetime.fromisoformat(metadata["last_accessed_at"]),
+            expires_at=datetime.fromisoformat(expires_at) if expires_at else None,
+            embedding=list(embedding) if embedding is not None else None,
         )
+
+    @classmethod
+    def _records_from_get(cls, result: dict[str, Any]) -> list[MemoryRecord]:
+        embeddings = result.get("embeddings")
+        if embeddings is None:
+            embeddings = [None] * len(result["ids"])
+        return [
+            cls._record_from_parts(memory_id, document, metadata, embedding)
+            for memory_id, document, metadata, embedding in zip(
+                result["ids"], result["documents"], result["metadatas"], embeddings, strict=True
+            )
+        ]
+
+    @classmethod
+    def _records_from_query(cls, result: dict[str, Any]) -> list[MemoryRecord]:
+        ids, documents, metadatas = result["ids"][0], result["documents"][0], result["metadatas"][0]
+        embeddings = result.get("embeddings")
+        embeddings = embeddings[0] if embeddings is not None else [None] * len(ids)
+        return [
+            cls._record_from_parts(memory_id, document, metadata, embedding)
+            for memory_id, document, metadata, embedding in zip(ids, documents, metadatas, embeddings, strict=True)
+        ]

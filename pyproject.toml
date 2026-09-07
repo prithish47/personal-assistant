@@ -8,8 +8,11 @@ version = "0.1.0"
 description = "Local-first autonomous desktop AI agent platform"
 requires-python = ">=3.11,<3.14"
 dependencies = [
+  "chromadb>=0.5.15,<1",
   "fastapi>=0.115,<1",
   "httpx>=0.27,<1",
+  "pillow>=10.4,<13",
+  "pyautogui>=0.9.54,<1",
   "pydantic>=2.9,<3",
   "pydantic-settings>=2.6,<3",
   "uvicorn[standard]>=0.30,<1",
@@ -17,6 +20,9 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["build>=1.2", "mypy>=1.13", "pytest>=8.3", "pytest-asyncio>=0.24", "ruff>=0.8"]
+# Local speech I/O for the voice transport layer. Optional: the rest of JANUS (text
+# chat, memory, research, computer-use) works without either of these installed.
+voice = ["faster-whisper>=1.0,<2", "pyttsx3>=2.90,<3"]
 
 [project.scripts]
 aria = "aria.main:run"
@@ -32,9 +38,22 @@ target-version = "py311"
 select = ["E", "F", "I", "UP", "B", "ASYNC"]
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.12"
 strict = true
 packages = ["aria"]
+
+[[tool.mypy.overrides]]
+module = ["chromadb.*", "numpy.*"]
+ignore_missing_imports = true
+follow_imports = "skip"
+
+[[tool.mypy.overrides]]
+module = ["pyautogui.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["faster_whisper.*", "pyttsx3.*", "pythoncom.*"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

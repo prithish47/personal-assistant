@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 from collections.abc import AsyncIterator
 
@@ -24,17 +25,34 @@ class OllamaProvider(LLMProvider):
         self._context_window = settings.context_window
         self._client = client
 
-    def _messages(self, messages: list[ChatMessage]) -> list[dict[str, str]]:
-        return [{"role": message.role.value, "content": message.content} for message in messages]
+    def _messages(self, messages: list[ChatMessage]) -> list[dict[str, object]]:
+        payload: list[dict[str, object]] = []
+        for message in messages:
+            item: dict[str, object] = {"role": message.role.value, "content": message.content}
+            if message.images:
+                # Base64 encoding is an Ollama wire-format detail; it stays in this
+                # adapter so domain code and agents only ever deal in raw bytes.
+                item["images"] = [base64.b64encode(image).decode("ascii") for image in message.images]
+            payload.append(item)
+        return payload
+
+    def _options(self, temperature: float | None) -> dict[str, object]:
+        return {
+            "temperature": temperature if temperature is not None else self._temperature,
+            "num_ctx": self._context_window,
+        }
 
     async def complete(
-        self, messages: list[ChatMessage], tools: list[dict[str, object]] | None = None
+        self,
+        messages: list[ChatMessage],
+        tools: list[dict[str, object]] | None = None,
+        temperature: float | None = None,
     ) -> ModelResponse:
         payload: dict[str, object] = {
             "model": self._model,
             "messages": self._messages(messages),
             "stream": False,
-            "options": {"temperature": self._temperature, "num_ctx": self._context_window},
+            "options": self._options(temperature),
         }
         if tools:
             payload["tools"] = [{"type": "function", "function": tool} for tool in tools]
@@ -51,13 +69,16 @@ class OllamaProvider(LLMProvider):
             raise ProviderError(f"Ollama completion failed: {error}") from error
 
     async def stream(
-        self, messages: list[ChatMessage], tools: list[dict[str, object]] | None = None
+        self,
+        messages: list[ChatMessage],
+        tools: list[dict[str, object]] | None = None,
+        temperature: float | None = None,
     ) -> AsyncIterator[str]:
         payload: dict[str, object] = {
             "model": self._model,
             "messages": self._messages(messages),
             "stream": True,
-            "options": {"temperature": self._temperature, "num_ctx": self._context_window},
+            "options": self._options(temperature),
         }
         if tools:
             payload["tools"] = [{"type": "function", "function": tool} for tool in tools]

@@ -28,6 +28,11 @@ class ToolRegistry:
         except KeyError as error:
             raise KeyError(f"Unknown tool: {name}") from error
 
+    def find(self, name: str) -> Tool[Any] | None:
+        """Return a registered tool, or None if unknown -- for callers that inspect before executing."""
+
+        return self._tools.get(name)
+
     def schemas(self) -> list[dict[str, object]]:
         """Expose only declarative schemas to the model layer."""
 

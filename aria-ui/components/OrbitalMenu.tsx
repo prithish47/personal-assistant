@@ -5,22 +5,20 @@ import { useAriaWebSocket } from '../hooks/useAriaWebSocket';
 
 const CommandButton = ({
   label,
-  intent,
-  target,
+  content,
   icon,
 }: {
   label: string;
-  intent: string;
-  target?: string;
+  content: string;
   icon?: string;
 }) => {
-  const { sendCommand } = useAriaWebSocket();
+  const { sendMessage } = useAriaWebSocket();
 
   return (
     <motion.button
       whileHover={{ scale: 1.05 }}
       whileTap={{ scale: 0.95 }}
-      onClick={() => sendCommand(intent, target)}
+      onClick={() => sendMessage(content)}
       className="relative shrink-0 flex items-center justify-between px-6 py-4 bg-black/40 border border-[#00f0ff]/30 rounded-lg group overflow-hidden transition-all duration-300 hover:shadow-[0_0_20px_rgba(0,240,255,0.4)] hover:border-[#00f0ff]"
     >
       <div className="absolute inset-0 bg-gradient-to-r from-[#00f0ff]/0 via-[#00f0ff]/10 to-[#00f0ff]/0 opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
@@ -35,6 +33,13 @@ const CommandButton = ({
   );
 };
 
+/**
+ * Quick actions send real chat turns through the same contract as manual
+ * input — e.g. "Open Valorant" is routed to ResearchAgent, which may call
+ * desktop.open_application (and get denied without an approval token, same
+ * as it would from the chat box). There is no backend "clear memory"
+ * capability, so that action was removed rather than left non-functional.
+ */
 export const OrbitalMenu = () => {
   return (
     <div className="flex flex-col gap-4 p-6 backdrop-blur-md bg-black/40 border border-[#0057ff]/30 rounded-xl shadow-[0_0_20px_rgba(0,87,255,0.15)]">
@@ -42,23 +47,8 @@ export const OrbitalMenu = () => {
         Quick Actions
       </h2>
       <div className="flex flex-row lg:flex-col gap-3 overflow-x-auto scrollbar-none pb-2 lg:pb-0">
-        <CommandButton
-          label="Launch Valorant"
-          intent="OS_EXECUTE"
-          target="Valorant"
-          icon="🎮"
-        />
-        <CommandButton
-          label="Open VS Code"
-          intent="OS_EXECUTE"
-          target="Code"
-          icon="💻"
-        />
-        <CommandButton
-          label="Clear Memory"
-          intent="SYSTEM_CLEAR_MEMORY"
-          icon="🧠"
-        />
+        <CommandButton label="Launch Valorant" content="Open Valorant" icon="🎮" />
+        <CommandButton label="Open VS Code" content="Open VS Code" icon="💻" />
       </div>
     </div>
   );

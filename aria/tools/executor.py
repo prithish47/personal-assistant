@@ -10,7 +10,7 @@ from pydantic import ValidationError
 from aria.core.audit import AuditLogger
 from aria.core.errors import PermissionDeniedError, ToolValidationError
 from aria.domain.models import ToolExecutionRecord, ToolStatus
-from aria.tools.base import ToolContext
+from aria.tools.base import ToolContext, redact_arguments
 from aria.tools.permissions import PermissionManager
 from aria.tools.registry import ToolRegistry
 
@@ -32,6 +32,9 @@ class ToolExecutor:
         started = perf_counter()
         try:
             tool = self._registry.get(name)
+            # Redact before validation even runs, so a sensitive value never reaches the
+            # audited record regardless of whether the input turns out to be valid.
+            record.arguments = redact_arguments(raw_arguments, tool.sensitive_fields)
             arguments = tool.input_model.model_validate(raw_arguments)
             await self._permissions.require(tool.permission_level, context)
             record.result = await tool.execute(context, arguments)

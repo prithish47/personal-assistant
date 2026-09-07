@@ -1,7 +1,7 @@
 'use client';
 
 import { TerminalFeed } from '../components/TerminalFeed';
-import { TelemetryRings } from '../components/TelemetryRings';
+import { AgentStatusPanel } from '../components/AgentStatusPanel';
 import { OrbitalMenu } from '../components/OrbitalMenu';
 import { useAriaWebSocket } from '../hooks/useAriaWebSocket';
 
@@ -37,7 +37,7 @@ export default function DashboardPage() {
           </div>
 
           <div className="flex flex-col lg:flex-1 gap-4 lg:gap-8 overflow-y-auto overflow-x-hidden scrollbar-none pb-2 lg:pb-0">
-            <TelemetryRings />
+            <AgentStatusPanel />
             <OrbitalMenu />
           </div>
         </div>

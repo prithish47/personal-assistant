@@ -36,6 +36,7 @@ data/
 # Node / Next build artifacts
 aria-ui/node_modules/
 aria-ui/.next/
+aria-ui/tsconfig.tsbuildinfo
 
 # Logs
 *.log
@@ -43,6 +44,7 @@ aria-ui/.next/
 # Environment variables
 .env
 .env.*
+!aria-ui/.env.local.example
 
 # Python bytecode
 *.pyc

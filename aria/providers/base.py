@@ -13,12 +13,25 @@ class LLMProvider(ABC):
 
     @abstractmethod
     async def complete(
-        self, messages: list[ChatMessage], tools: list[dict[str, object]] | None = None
+        self,
+        messages: list[ChatMessage],
+        tools: list[dict[str, object]] | None = None,
+        temperature: float | None = None,
     ) -> ModelResponse:
-        """Return a complete response, optionally containing structured tool calls."""
+        """Return a complete response, optionally containing structured tool calls.
+
+        `temperature`, when given, overrides the configured default for this
+        call only -- structured-output callers (routing, planning) request a
+        low value for reliable JSON; conversational callers leave it unset.
+        """
 
     @abstractmethod
-    def stream(self, messages: list[ChatMessage], tools: list[dict[str, object]] | None = None) -> AsyncIterator[str]:
+    def stream(
+        self,
+        messages: list[ChatMessage],
+        tools: list[dict[str, object]] | None = None,
+        temperature: float | None = None,
+    ) -> AsyncIterator[str]:
         """Yield response text deltas."""
 
     @abstractmethod

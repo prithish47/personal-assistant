@@ -20,11 +20,18 @@ class MessageRole(StrEnum):
 
 
 class ChatMessage(BaseModel):
-    """A provider-neutral conversation message."""
+    """A provider-neutral conversation message.
+
+    `images`, when set, are raw image bytes (e.g. a screenshot) attached to
+    this message. Encoding them for a specific provider's wire format (such
+    as Ollama's base64 `images` field) is that provider adapter's job, not
+    domain code's -- see `OllamaProvider._messages`.
+    """
 
     role: MessageRole
     content: str
     name: str | None = None
+    images: list[bytes] | None = None
 
 
 class ToolCall(BaseModel):

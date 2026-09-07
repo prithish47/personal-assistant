@@ -33,22 +33,15 @@ class MemoryService:
         return await self._repository.save(record)
 
     async def retrieve(self, user_id: str, query: str, limit: int = 8) -> list[MemoryRecord]:
-        """Return importance-, recency-, and cosine-ranked memories for a query."""
+        """Return importance-, recency-, and similarity-ranked memories for a query."""
 
         query_vector = (await self._provider.embed([query]))[0]
+        candidates = await self._repository.query_similar(user_id, query_vector, limit * 3)
         now = datetime.now(UTC)
         scored: list[tuple[float, MemoryRecord]] = []
-        for record in await self._repository.find(user_id):
-            similarity = self._cosine(query_vector, record.embedding or [])
+        for record, similarity in candidates:
             age_days = max((now - record.updated_at).total_seconds() / 86_400, 0.0)
             decay = 1.0 if record.pinned else math.exp(-age_days / 180)
             score = similarity * 0.65 + record.importance * 0.25 + decay * 0.10
             scored.append((score, record))
         return [record for _, record in sorted(scored, key=lambda item: item[0], reverse=True)[:limit]]
-
-    @staticmethod
-    def _cosine(left: list[float], right: list[float]) -> float:
-        if not left or len(left) != len(right):
-            return 0.0
-        denominator = math.sqrt(sum(value * value for value in left)) * math.sqrt(sum(value * value for value in right))
-        return sum(a * b for a, b in zip(left, right, strict=True)) / denominator if denominator else 0.0

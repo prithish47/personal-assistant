@@ -14,7 +14,7 @@ from aria.core.config import Settings
 def test_tools_endpoint_requires_bearer_token(tmp_path: Path) -> None:
     """The tool catalog is not exposed to unauthenticated callers."""
 
-    settings = Settings(api_key=SecretStr("a" * 40), memory_database=tmp_path / "aria.sqlite3")
+    settings = Settings(api_key=SecretStr("a" * 40), memory_persist_directory=tmp_path / "chroma")
     with TestClient(create_app(settings)) as client:
         assert client.get("/v1/tools").status_code == 401
         response = client.get("/v1/tools", headers={"Authorization": f"Bearer {'a' * 40}"})
